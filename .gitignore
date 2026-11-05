@@ -29,3 +29,5 @@ Ultralytics/
 .browser_cam_key
 *.task
 .streamlit/secrets.toml
+
+assets/
