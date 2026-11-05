@@ -1,0 +1,14 @@
+ultralytics>=8.3.0
+numpy>=1.24
+PyYAML>=6.0
+python-dotenv>=1.0
+requests>=2.31
+streamlit>=1.35
+pandas>=2.0
+reportlab>=4.0         # PDF alert report in the dashboard
+opencv-python>=4.8,<5  # face cascades (cap/mask/beard fallback) are missing in OpenCV 5; 4.8+ has the face models (face recognition)
+transformers>=4.41    # CLIP fallback for cap/mask/beard (downloads ~600 MB on first use)
+# torch is installed automatically by ultralytics. For a smaller CPU-only install, first run:
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+# Optional (faster inference on Intel CPUs after export):
+# openvino>=2024.0

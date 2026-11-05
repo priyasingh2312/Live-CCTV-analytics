@@ -1,0 +1,173 @@
+# ============================================================
+#  CCTV Video Analytics - main configuration
+#  Secrets (RTSP password, Telegram token, SMTP password) go in
+#  the .env file, NOT here. See .env.example
+# ============================================================
+
+camera:
+  name: camera-1            # shown in the dashboard and stored with every alert
+  # Used when RTSP_URL is not set in .env and --source is not given.
+  # 0 = laptop/USB webcam (testing phase). 1, 2 ... = other cameras.
+  # Later switch to the CCTV: put RTSP_URL=rtsp://... in .env (it overrides this),
+  # or set source to the rtsp:// URL here.
+  source: 0
+  reconnect_seconds: 5
+
+dashboard:
+  title: SceneWyse    # name shown in the top bar, sign-in page and browser tab
+  logo: ""    # optional image file (e.g. assets/logo.png). Empty = the name is written as text, like the design
+
+runtime:
+  device: cpu            # cpu only (as chosen). Use 0 for first NVIDIA GPU later.
+  imgsz: 640             # smaller (e.g. 480) = faster on CPU, less accurate for small objects
+  conf: 0.35             # default confidence threshold (can be overridden per model)
+  streak_gap: 2          # an event may be missed this many AI runs in a row without its 'min_consecutive' count restarting (0 = old strict behaviour)
+  box_smooth: 0.5        # steadier boxes: how much a new detection moves a box (1 = off, 0.3 = very steady but slower to follow)
+  box_hold: 1            # keep a box for this many AI runs after it is missed, so it does not blink off (0 = off)
+  box_hold_sec: 3.0      # ... but never longer than this many seconds
+  box_glide: 0.12        # seconds a box takes to slide to its new place instead of jumping (0 = jump)
+  frame_skip: 3          # run AI on every Nth frame (CPU friendly). Video display stays smooth.
+  show_window: true      # live annotated OpenCV window (press q to quit)
+  outputs_dir: outputs   # snapshots, events.db (SQLite), dashboard files go here
+  live_interval: 0.1      # seconds between live pictures (0.1 = about 10 per second; raise it if the PC struggles)
+  live_stream: true       # play the camera as a real video stream in the dashboard (false = still pictures)
+  stream_host: 127.0.0.1  # who can open the stream. 127.0.0.1 = only this PC. Use 0.0.0.0 to watch from other computers on your network (the stream has no password!)
+  stream_port: 8599       # port of the live video stream
+  dashboard_interval: 1.0  # seconds between dashboard file refreshes
+
+alerts:
+  cooldown_seconds: 120  # same event from same detector will not alert again within this time
+  telegram:
+    enabled: false       # set true after adding TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID to .env
+  email:
+    enabled: true        # needs SMTP_* / ALERT_EMAIL_TO in .env
+    batch_seconds: 30    # alerts of all analytics within this many seconds are sent as ONE e-mail. 0 = one e-mail per alert
+
+# ------------------------------------------------------------
+#  One block per use case. The block name = detector file name.
+#
+#  models:      list of weight files. coco: true => downloaded automatically.
+#               Custom weights (coco: false) must be placed in models/ by you
+#               (or trained with training/train.py).
+#  classes:     class names to keep from that model (must match the model's names;
+#               run  python tools\inspect_model.py models\mask.pt  to see them).
+#  rename:      optional {model_name: display_name} to map a model's class names.
+#  alert_classes: if any of these classes is seen, an event/alert is raised.
+#  max_counts:  raise an event when a class count goes ABOVE the number.
+#  min_consecutive: event must be seen in N consecutive AI runs (reduces false alarms).
+# ------------------------------------------------------------
+detectors:
+
+  person_count:
+    models:
+      - weights: models/yolov8n.pt
+        coco: true
+        classes: [person]
+        conf: 0.45        # higher = fewer false people (jackets on chairs). Lower it if real people are missed.
+        imgsz: 1280       # bigger image finds small people on wide CCTV views (slower); used for this model only
+        iou: 0.4          # merge boxes that overlap more than this (default 0.7): one person was counted twice. Raise it if people standing close together are merged into one.
+    max_counts: {person: 20}
+    min_consecutive: 3
+
+  cap_detection:
+    models:
+      - weights: models/cap.pt              # trained on the merged cap datasets + frames from the office CCTV (classes: cap, no_cap)
+        conf: 0.35                          # the lowest score the model reports; the limits below are applied on top
+        class_conf: {cap: 0.75, no_cap: 0.45}   # 'cap' must be very sure (fewer false caps on bags, posters ...); 'no_cap' can be less sure
+        classes: [cap, no_cap]
+        imgsz: 960                          # the size it was trained at
+    clip:                                   # fallback settings (common/appearance.py)
+      threshold: 0.65                       # higher = fewer, surer detections. Unsure faces get no label.
+      face_check: 0.6                       # drop 'faces' that are really doors, posters, scarves, sleeves. 0 = off. Lower it if real faces are missed.
+    alert_classes: [no_cap]
+    min_consecutive: 2
+
+  gloves_detection:
+    models:
+      - weights: models/appearance.pt       # gloves model trained on the merged datasets (classes: gloves, no_gloves, cap, no_cap); cap/no_cap are ignored here
+        conf: 0.35                          # the lowest score the model reports; the limits below are applied on top
+        class_conf: {gloves: 0.80, no_gloves: 0.45}   # 'gloves' must be very sure (a bare hand is often mistaken for a glove); lower no_gloves if bare hands are missed
+        classes: [gloves, no_gloves]
+        one_box_per_object: true
+    alert_classes: [no_gloves]
+    min_consecutive: 3
+
+  button_detection:
+    models:
+      - weights: models/button.pt
+        conf: 0.70             # higher = fewer false buttons (ceiling fixtures, patterns). Lower it if real buttons are missed.
+        classes: [button]      # run: python tools\inspect_model.py models\button.pt  and match the name
+    torso_gate: true           # look for buttons only on each person's chest/torso (bracelets, watches, clocks, lights are ignored). false = whole picture
+    torso_y: [0.18, 0.80]      # torso = this part of the person's height (0 = head top, 1 = feet). Lower the first number if the collar area is cut off
+    torso_x: [0.12, 0.88]      # ... and this part of the width (leaves out arms hanging at the sides)
+    max_button_frac: 0.12      # ignore 'buttons' wider than this share of the torso (big false boxes)
+    person_conf: 0.40          # how sure the person finder must be
+    person_imgsz: 960          # bigger finds small people on wide CCTV views
+    garment: shirt             # default garment; override with:  python detectors\button_detection.py --garment blazer
+    garments:                  # minimum buttons normally visible on the front. Alert when 1 up to (N-1) are seen.
+      shirt: 4                 # shirts have 4 to 5 buttons
+      blazer: 2                # blazers have 2 to 3
+      tshirt: 3                # t-shirts have 3 to 4
+    min_consecutive: 5
+
+  shoes_detection:
+    models:
+      - weights: models/gloves_shoes.pt     # same shared model; 'barefeet' is shown as no_shoes
+        classes: [shoes, barefeet]
+        rename: {barefeet: no_shoes}
+        one_box_per_object: true     # same foot labelled both shoes and no_shoes -> keep only the best box
+        min_box_aspect: 0.75         # ignore tall thin boxes (width < 0.75 x height), e.g. chair legs. 0 / remove = off
+    alert_classes: [no_shoes]
+    min_consecutive: 3
+
+  mask_detection:
+    models:
+      - weights: models/mask.pt
+        classes: [mask, no_mask]
+        imgsz: 960
+        conf: 0.40
+    clip:
+      threshold: 0.65
+      face_check: 0.6
+    alert_classes: [no_mask]
+    min_consecutive: 2
+
+  beard_detection:
+    classifier:               # trained face classifier (training/colab_train_cls.ipynb) - used when the file exists
+      weights: models/beard_cls.pt
+      imgsz: 224
+      threshold: 0.60         # how sure it must be before it says beard / no_beard. Raise it for fewer false alerts
+      smoothing: 0.4          # steadier label: 1 = no smoothing (flickers), 0.2 = very steady but slower to react
+      min_face: 40            # ignore faces smaller than this many pixels
+    models:
+      - weights: models/beard.pt
+        classes: [beard, no_beard]
+    clip:
+      threshold: 0.65
+      face_check: 0.6       # drop 'faces' that are really shirts, doors, posters. 0 = off. Lower it if real faces are missed.
+    alert_classes: [beard]      # alert on an unshaved face (beard visible). Remove this line to count only.
+    min_consecutive: 2
+
+  object_detection:      # laptop, pen, diary, chair, mobile phone  (diary = pretrained 'book'; pen = custom model)
+    models:
+      - weights: models/yolov8n.pt          # pretrained COCO: laptop, chair, phone
+        conf: 0.70
+        coco: true
+        classes: [laptop, chair, cell phone, book]
+        rename: {cell phone: mobile phone, book: diary}   # 'book' stands in for a diary/notebook (it also fires on any book)
+      # PEN IS OFF FOR NOW (model not final). To switch it back on, remove the '#' from the next 4 lines.
+      # - weights: models/pen_v3.pt              # custom pen model (train: python training\train.py --detector object_detection)
+      #   conf: 0.30             # pen_v3 scores a real pen about 0.4+; 0.15 let chair corners through, 0.70 hides real pens
+      #   max_box_height: 0.5    # ignore 'pens' taller than half the frame (dupatta/scarf stripes were detected as pens)
+      #   classes: [pen]
+    min_consecutive: 2
+
+  face_recognition:       # live face recognition. Add people in the dashboard: Faces tab -> Start capture
+    threshold: 0.40       # how alike two faces must be to count as the same person (0.30-0.60). Higher = stricter, more 'Unknown'. Lower it if known people show as Unknown.
+    det_score: 0.80       # face finder confidence. Lower it if real faces are missed.
+    min_face: 48          # ignore faces narrower than this many pixels (too small to recognise reliably)
+    det_width: 1280       # the picture is shrunk to this width before faces are searched (bigger finds smaller faces, slower)
+    enroll_samples: 20    # face pictures collected when a person is added
+    log_known: false      # true = also log every sighting of a known person in the alert history
+    alert_classes: [Unknown]
+    min_consecutive: 3

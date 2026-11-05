@@ -1,0 +1,31 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+
+# generated output (snapshots contain faces of people - keep private)
+outputs/
+runs/
+test_frame.jpg
+*.log
+
+# footage, datasets and model weights
+datasets/
+*.mp4
+*.avi
+*.mkv
+*.pt
+*.onnx
+*_openvino_model/
+.ipynb_checkpoints/
+
+# enrolled people (face embeddings and pictures are personal data)
+faces/
+
+# added before first push
+*.zip
+recordings/
+Ultralytics/
+.browser_cam_key
+*.task
+.streamlit/secrets.toml

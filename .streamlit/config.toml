@@ -1,0 +1,11 @@
+[client]
+# hides the Deploy button and menu but keeps the sidebar controls
+toolbarMode = "minimal"
+
+[theme]
+base = "light"
+primaryColor = "#0F9D8F"
+backgroundColor = "#F3F7FB"
+secondaryBackgroundColor = "#FFFFFF"
+textColor = "#1B2430"
+font = "sans serif"

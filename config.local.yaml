@@ -1,0 +1,15 @@
+# Your own settings. They are read on top of config.yaml, so they win. Only list what you want to change.
+# Anything here is safe even if config.yaml is overwritten by an editor.
+
+runtime:
+  box_hold: 0            # 0 = a box disappears as soon as it is lost (no leftover ghost boxes)
+
+detectors:
+  gloves_detection:
+    models:
+      - weights: models/gloves_v2.pt        # retrained with bare and gloved hands from the CCTV camera and webcam
+        imgsz: 640
+        conf: 0.30                          # the lowest score the model reports; the limits below are applied on top
+        class_conf: {gloves: 0.60, no_gloves: 0.40}   # raise 'gloves' if bare hands are still called gloves; lower it if real gloves are missed
+        classes: [gloves, no_gloves]
+        one_box_per_object: true
