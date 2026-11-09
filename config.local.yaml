@@ -3,13 +3,65 @@
 
 runtime:
   box_hold: 0            # 0 = a box disappears as soon as it is lost (no leftover ghost boxes)
+  per_person_alerts: true   # ONE alert per person; a new alert only for a new person, or after someone left the picture and came back
+  person_lost_sec: 8        # seconds out of view before a person counts as new when they return
+  person_every: 0.5         # seconds between person searches (small model, little CPU)
 
 detectors:
   gloves_detection:
+    min_consecutive: 1
     models:
-      - weights: models/gloves_v2.pt        # retrained with bare and gloved hands from the CCTV camera and webcam
+      - weights: models/gloves_v3.pt        # retrained with bare and gloved hands from the CCTV camera and webcam
         imgsz: 640
-        conf: 0.30                          # the lowest score the model reports; the limits below are applied on top
-        class_conf: {gloves: 0.60, no_gloves: 0.40}   # raise 'gloves' if bare hands are still called gloves; lower it if real gloves are missed
+        conf: 0.25                          # the lowest score the model reports; the limits below are applied on top
+        class_conf: {gloves: 0.60, no_gloves: 0.25}   # raise 'gloves' if bare hands are still called gloves; lower it if real gloves are missed
         classes: [gloves, no_gloves]
         one_box_per_object: true
+
+  cap_detection:
+    min_consecutive: 1
+    models:
+      - weights: models/cap_v3.pt            # trained with your seat clips. Old model: models/cap.pt
+        conf: 0.25                          # the lowest score the model reports; the limits below are applied on top
+        class_conf: {cap: 0.65, no_cap: 0.25}   # 'no_cap' shows even when the model is only 25% sure (close-up faces). Raise it if you get false 'no cap' boxes.
+        classes: [cap, no_cap]
+        imgsz: 960
+    near_face:                              # cap_detection only: also check big close-up faces (someone sitting right at the camera)
+      enabled: false          # off: cap_v3 was trained on seat close-ups, so the extra check is no longer needed
+      min_face: 90                          # face height in pixels from which the close-up check is used
+      face_px: 36                           # the face is shrunk to this height before the model looks at it
+
+  mask_detection:
+    min_consecutive: 1
+    models:
+      - weights: models/mask.pt
+        classes: [mask, no_mask]
+        imgsz: 960
+        conf: 0.25
+        class_conf: {mask: 0.40, no_mask: 0.25}   # 'no_mask' shows even when the model is only 25% sure
+    side_face:                              # mask_detection only: no label for faces turned away from the camera
+      enabled: true
+      max_turn: 0.35                        # raise (e.g. 0.5) to allow more turned faces, lower to be stricter
+      min_eye_ratio: 0.28
+
+  shoes_detection:
+    min_consecutive: 1
+    models:
+      - weights: models/shoes_v2.pt         # trained on shoes / no_shoes (bare feet, socks, slippers, sandals). Old model: models/gloves_shoes.pt
+        classes: [shoes, no_shoes]
+        imgsz: 960
+        one_box_per_object: true
+        min_box_aspect: 0.5
+        conf: 0.25
+        class_conf: {shoes: 0.40, no_shoes: 0.30}   # raise a number if that class gives false boxes
+
+  beard_detection:
+    min_consecutive: 1
+    classifier:
+      threshold: 0.45         # lower than before so a box shows more often (was 0.60)
+    side_face:                              # beard_detection only: no label for faces turned away from the camera
+      enabled: true
+      max_turn: 0.35
+      min_eye_ratio: 0.28
+
+# Faster alerts: an alert needs this many detections in a row (1 = the first one counts). Raise a number if one class gives false alerts.

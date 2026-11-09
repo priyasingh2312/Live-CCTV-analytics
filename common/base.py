@@ -20,6 +20,7 @@ import yaml
 
 from .alerts import AlertManager
 from .models import load_model
+from .people import PersonTracker, Tracks
 from .store import EventStore
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -33,7 +34,23 @@ def load_config(path=None):
         pass
     p = Path(path) if path else ROOT / "config.yaml"
     with open(p, "r", encoding="utf-8") as f:
-        return yaml.safe_load(f)
+        cfg = yaml.safe_load(f)
+    # config.local.yaml (your own settings) is read on top of config.yaml, so an editor overwriting config.yaml
+    # cannot lose them. Dicts are merged key by key; lists and single values are replaced.
+    local = ROOT / "config.local.yaml"
+    if path is None and local.exists():
+        with open(local, "r", encoding="utf-8") as f:
+            cfg = _merge(cfg, yaml.safe_load(f) or {})
+    return cfg
+
+
+def _merge(base, over):
+    if isinstance(base, dict) and isinstance(over, dict):
+        out = dict(base)
+        for k, v in over.items():
+            out[k] = _merge(base[k], v) if k in base else v
+        return out
+    return over
 
 
 def _atomic_write(path, data):
@@ -103,11 +120,17 @@ class EventSink:
         self.cooldown = alerts_cfg.get("cooldown_seconds", 120)
         self.alerts = AlertManager(alerts_cfg)
         self._last = {}
+        self.people = None
+        if (cfg.get("runtime") or {}).get("per_person_alerts"):
+            self.people = PersonTracker(cfg["runtime"])
+            if not self.people.ready:
+                self.people = None      # no person model: keep the old cooldown rule
 
-    def emit(self, detector, event, count, frame):
+    def emit(self, detector, event, count, frame, force=False):
+        """force=True: the caller already decided this is a NEW case (a new person), so no cooldown applies."""
         key = (detector, event)
         now = time.time()
-        if now - self._last.get(key, 0) < self.cooldown:
+        if not force and now - self._last.get(key, 0) < self.cooldown:
             return False
         self._last[key] = now
         ts = datetime.now()
@@ -148,6 +171,9 @@ class BaseDetector:
         self.infer_ms = 0.0
         self._streak = {}
         self._gap = {}
+        self._alerted = set()      # (person, event) pairs already alerted while that person stays in view
+        self._orph = {}            # per event: tracks for violations that are not inside any person box
+        self.person_lost = float(rt.get("person_lost_sec", 8.0))
         self.streak_gap = int(rt.get("streak_gap", 2))   # AI runs an event may be missed before its count restarts
         self._runs, self._ms_total = 0, 0.0
         self._last_publish = 0.0
@@ -318,14 +344,49 @@ class BaseDetector:
         if self._runs == 10:
             print(f"[{self.name}] speed: about {self._ms_total / 10:.0f} ms per AI run")
         annotated = None
+        people = getattr(self.sink, "people", None)
+        alert_set = set(self.cfg.get("alert_classes") or [])
+        if people is not None:
+            people.refresh(frame)          # keeps every person's id alive even while nobody breaks a rule
         for event, cnt in active.items():
             self._gap[event] = 0
             self._streak[event] = self._streak.get(event, 0) + 1
             if self._streak[event] >= need:
+                if people is not None and event in alert_set:
+                    fresh = self._new_people(event, dets, people)
+                    if not fresh:
+                        continue            # this person was already alerted and is still in view
+                    if annotated is None:
+                        annotated = self.draw(frame.copy())
+                    self.sink.emit(self.name, event, fresh, annotated, force=True)
+                    continue
                 if annotated is None:
                     annotated = self.draw(frame.copy())
                 self.sink.emit(self.name, event, cnt, annotated)
         self._publish(frame)
+
+    def _new_people(self, event, dets, people):
+        """How many people showing `event` have NOT been alerted yet. A person stays 'alerted' until they leave the picture."""
+        rows = [d for d in dets if d["label"] == event]
+        keys, loose = [], []
+        for d in rows:
+            pid = people.owner(d["box"])
+            if pid is not None:
+                keys.append(("p", pid, event))
+            else:
+                loose.append(d["box"])      # violation not inside a person box (person missed): follow the box itself
+        orph = self._orph.setdefault(event, Tracks(self.person_lost, reach=2.0))
+        for oid in orph.update(loose):
+            keys.append(("o", oid, event))
+        live_p, live_o = people.alive(), orph.alive()
+        self._alerted = {k for k in self._alerted
+                         if (k[0] == "p" and k[1] in live_p) or (k[0] == "o" and (k[2] != event or k[1] in live_o))}
+        fresh = set(keys) - self._alerted
+        self._alerted |= fresh
+        for k in sorted(fresh):
+            print(f"[people] {self.name} {event}: new {'person' if k[0] == 'p' else 'unmatched box'} #{k[1]} "
+                  f"({len(live_p)} people in view)")
+        return len(fresh)
 
     # ---------------------------------------------------------- drawing
     @staticmethod

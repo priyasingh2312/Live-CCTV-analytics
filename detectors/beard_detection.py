@@ -20,6 +20,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
 from common.appearance import AppearanceDetector  # noqa: E402
 from common.runner import main  # noqa: E402
+from common.turn import is_turned  # noqa: E402
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
@@ -30,6 +31,10 @@ class BeardDetector(AppearanceDetector):
 
     def _load_models(self):
         self._cls = None
+        sf = self.cfg.get("side_face") or {}
+        # turned faces get no beard / no_beard label (side_face: enabled: true in config.yaml -> beard_detection)
+        self._side = ((float(sf.get("max_turn", 0.35)), float(sf.get("min_eye_ratio", 0.28)))
+                      if sf.get("enabled", False) else None)
         opts = self.cfg.get("classifier") or {}
         path = pathlib.Path(opts.get("weights", "models/beard_cls.pt"))
         if not path.is_absolute():
@@ -61,6 +66,8 @@ class BeardDetector(AppearanceDetector):
             x1, y1, x2, y2 = f["box"]
             w, h = x2 - x1, y2 - y1
             if min(w, h) < self._min_face:
+                continue
+            if self._side and is_turned(f["row"], *self._side):
                 continue
             # face plus a margin (hair, jaw and chin) - the training pictures are framed like this
             cx1, cy1 = max(0, x1 - int(0.25 * w)), max(0, y1 - int(0.30 * h))

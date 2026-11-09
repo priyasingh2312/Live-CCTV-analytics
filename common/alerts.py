@@ -61,10 +61,16 @@ class AlertManager:
             self._send_email(items)
 
     def _send_email(self, items):
-        try:
-            self._email(items)
-        except Exception as e:
-            print(f"[alert] email failed: {e}")
+        err = None
+        for attempt in range(3):            # a dropped connection is common: try again with a fresh one
+            try:
+                self._email(items)
+                return
+            except Exception as e:
+                err = e
+                import time
+                time.sleep(2 * (attempt + 1))
+        print(f"[alert] email failed: {err}")
 
     @staticmethod
     def _telegram(text, image_path):
