@@ -415,12 +415,28 @@ class BaseDetector:
             ids = {d.get("_id") for d in live}
             for k in [k for k in self._disp if k not in ids]:
                 self._disp.pop(k, None)
+        fh, fw = frame.shape[:2]
+        lfont = cv2.FONT_HERSHEY_DUPLEX
+        lscale = max(0.55, fw / 1280 * 0.75)            # label text grows with the picture width
+        lthick = 2 if lscale >= 0.9 else 1
+        bthick = max(2, int(round(fw / 480)))           # box line grows with the picture width
         for d in live:
             x1, y1, x2, y2 = self._glide(d)
             c = (0, 0, 255) if d["label"] in (self.cfg.get("alert_classes") or []) else self._color(d["label"])
-            cv2.rectangle(frame, (x1, y1), (x2, y2), c, 2)
-            cv2.putText(frame, f'{self.nice(d["label"])} {int(round(d["conf"] * 100))}%', (x1, max(15, y1 - 6)),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, c, 2)
+            cv2.rectangle(frame, (x1, y1), (x2, y2), c, bthick)
+            # label: big text on a solid tag in the box colour, sitting on the top edge of the box
+            label = f'{self.nice(d["label"])} {int(round(d["conf"] * 100))}%'
+            (tw, th), lb = cv2.getTextSize(label, lfont, lscale, lthick)
+            lpad = max(4, int(lscale * 6))
+            tag_w, tag_h = tw + 2 * lpad, th + lb + 2 * lpad
+            tx = max(0, min(x1, fw - tag_w))
+            ty = y1 - tag_h
+            if ty < 0:                                  # no room above: put the tag under the box instead
+                ty = y2 if y2 + tag_h <= fh else y1
+            cv2.rectangle(frame, (tx, ty), (tx + tag_w, ty + tag_h), c, -1)
+            lum = 0.114 * c[0] + 0.587 * c[1] + 0.299 * c[2]            # colours are BGR
+            cv2.putText(frame, label, (tx + lpad, ty + lpad + th), lfont, lscale,
+                        (0, 0, 0) if lum > 170 else (255, 255, 255), lthick, cv2.LINE_AA)
         if self.name == "person_count":
             n = self.last_counts.get("person", 0)
             summary = f"{n} {'person' if n == 1 else 'people'}"

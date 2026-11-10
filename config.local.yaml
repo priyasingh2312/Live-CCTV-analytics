@@ -52,6 +52,8 @@ detectors:
         imgsz: 960
         one_box_per_object: true
         min_box_aspect: 0.5
+        max_box_height: 0.22      # a shoe is small: ignore boxes taller than 22% of the picture (a chair back was boxed as 'Shoes')
+        max_box_width: 0.20       # ... or wider than 20% of the picture
         conf: 0.25
         class_conf: {shoes: 0.40, no_shoes: 0.30}   # raise a number if that class gives false boxes
 

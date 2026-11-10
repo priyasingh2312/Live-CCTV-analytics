@@ -1606,6 +1606,8 @@ if st.session_state.get("page") == "logs":
     st.stop()
 
 topbar()
+st.markdown('<div style="font-size:1.55rem;font-weight:700;color:#0F1B2D;letter-spacing:-.2px;margin:-3.3rem 0 .3rem">'
+            'Welcome back</div>', unsafe_allow_html=True)
 kpis()
 st.write("")
 tab_live, tab_alerts, tab_faces, tab_system = st.tabs(["Live view", "Alert history", "Faces", "System"])
